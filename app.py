@@ -5,6 +5,7 @@ import logging
 import uuid
 import httpx
 import asyncio
+from pydantic import Field
 from quart import (
     Blueprint,
     Quart,
@@ -36,10 +37,16 @@ from backend.utils import (
     format_pf_non_streaming_response,
 )
 
+from backend.orchestration.intent_detection import UserIntentDetector
+from backend.orchestration.orchestrator import Orchestrator
+
+logging.basicConfig(level=logging.DEBUG)
+
 bp = Blueprint("routes", __name__, static_folder="static", template_folder="static")
 
 cosmos_db_ready = asyncio.Event()
 
+orchestrator = Orchestrator()
 
 def create_app():
     app = Quart(__name__)
@@ -334,17 +341,8 @@ async def promptflow_request(request):
     except Exception as e:
         logging.error(f"An error occurred while making promptflow_request: {e}")
 
-
 async def send_chat_request(request_body, request_headers):
-    filtered_messages = []
-    messages = request_body.get("messages", [])
-    for message in messages:
-        if message.get("role") != 'tool':
-            filtered_messages.append(message)
-            
-    request_body['messages'] = filtered_messages
     model_args = prepare_model_args(request_body, request_headers)
-
     try:
         azure_openai_client = await init_openai_client()
         raw_response = await azure_openai_client.chat.completions.with_raw_response.create(**model_args)
@@ -386,8 +384,24 @@ async def stream_chat_request(request_body, request_headers):
 
 async def conversation_internal(request_body, request_headers):
     try:
+        filtered_messages = []
+        messages = request_body.get("messages", [])
+        for message in messages:
+            if message.get("role") != 'tool':
+                filtered_messages.append(message)
+                    
+            request_body['messages'] = filtered_messages
+            
         if app_settings.azure_openai.stream and not app_settings.base_settings.use_promptflow:
-            result = await stream_chat_request(request_body, request_headers)
+            azure_openai_client = await init_openai_client()
+            user_intent_detector = UserIntentDetector(
+                azure_openai_client, 
+                app_settings.azure_openai.intent_detection_model or app_settings.azure_openai.model)
+            
+            run_aoai_on_your_data_fn = lambda: stream_chat_request(request_body, request_headers)
+            
+            result = await orchestrator.run(request_body, user_intent_detector, run_aoai_on_your_data_fn)
+            
             response = await make_response(format_as_ndjson(result))
             response.timeout = None
             response.mimetype = "application/json-lines"
@@ -402,8 +416,8 @@ async def conversation_internal(request_body, request_headers):
             return jsonify({"error": str(ex)}), ex.status_code
         else:
             return jsonify({"error": str(ex)}), 500
-
-
+        
+        
 @bp.route("/conversation", methods=["POST"])
 async def conversation():
     if not request.is_json:

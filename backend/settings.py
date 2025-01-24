@@ -32,6 +32,17 @@ DOTENV_PATH = os.environ.get(
 )
 MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION = "2024-05-01-preview"
 
+DEFAULT_SYSTEM_PROMPT = """
+You are an AI assistant whose only job is to answer the user's questions by referring strictly to the information provided. You must:
+
+1. Only answer questions using the specific context you are given. 
+2. If the question cannot be answered from the provided context, politely indicate that you do not have enough information.
+3. Do not provide external knowledge, speculate, or include details not found in the context.
+4. Keep your answers accurate, clear, and concise.
+
+If the user asks you for something beyond the scope of the provided context, respond that you don't have that information.
+"""
+
 
 class _UiSettings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -102,6 +113,7 @@ class _AzureOpenAISettings(BaseSettings):
     )
     
     model: str
+    intent_detection_model: Optional[str] = None
     key: Optional[str] = None
     resource: Optional[str] = None
     endpoint: Optional[str] = None
@@ -118,7 +130,7 @@ class _AzureOpenAISettings(BaseSettings):
     logit_bias: Optional[dict] = None
     presence_penalty: Optional[confloat(ge=-2.0, le=2.0)] = 0.0
     frequency_penalty: Optional[confloat(ge=-2.0, le=2.0)] = 0.0
-    system_message: str = "You are an AI assistant that helps people find information."
+    system_message: str = DEFAULT_SYSTEM_PROMPT
     preview_api_version: str = MINIMUM_SUPPORTED_AZURE_OPENAI_PREVIEW_API_VERSION
     embedding_endpoint: Optional[str] = None
     embedding_key: Optional[str] = None
