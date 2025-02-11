@@ -647,7 +647,7 @@ async def generate_title(conversation_messages) -> str:
     messages.append({"role": "user", "content": title_prompt})
 
     try:
-        azure_openai_client = await init_openai_client()
+        azure_openai_client = app.openai_client
         response = await azure_openai_client.chat.completions.create(
             model=app_settings.azure_openai.model, messages=messages, temperature=1, max_tokens=64
         )
