@@ -75,37 +75,6 @@ def generateFilterString(userToken):
     return f"{AZURE_SEARCH_PERMITTED_GROUPS_COLUMN}/any(g:search.in(g, '{group_ids}'))"
 
 
-def format_non_streaming_response(chatCompletion, history_metadata, apim_request_id):
-    response_obj = {
-        "id": chatCompletion.id,
-        "model": chatCompletion.model,
-        "created": chatCompletion.created,
-        "object": chatCompletion.object,
-        "choices": [{"messages": []}],
-        "history_metadata": history_metadata,
-        "apim-request-id": apim_request_id,
-    }
-
-    if len(chatCompletion.choices) > 0:
-        message = chatCompletion.choices[0].message
-        if message:
-            if hasattr(message, "context"):
-                response_obj["choices"][0]["messages"].append(
-                    {
-                        "role": "tool",
-                        "content": json.dumps(message.context),
-                    }
-                )
-            response_obj["choices"][0]["messages"].append(
-                {
-                    "role": "assistant",
-                    "content": message.content,
-                }
-            )
-            return response_obj
-
-    return {}
-
 def format_stream_response(chatCompletionChunk, history_metadata, apim_request_id):
     response_obj = {
         "id": chatCompletionChunk.id,
@@ -141,71 +110,6 @@ def format_stream_response(chatCompletionChunk, history_metadata, apim_request_i
                     return response_obj
 
     return {}
-
-
-def format_pf_non_streaming_response(
-    chatCompletion, history_metadata, response_field_name, citations_field_name, message_uuid=None
-):
-    if chatCompletion is None:
-        logging.error(
-            "chatCompletion object is None - Increase PROMPTFLOW_RESPONSE_TIMEOUT parameter"
-        )
-        return {
-            "error": "No response received from promptflow endpoint increase PROMPTFLOW_RESPONSE_TIMEOUT parameter or check the promptflow endpoint."
-        }
-    if "error" in chatCompletion:
-        logging.error(f"Error in promptflow response api: {chatCompletion['error']}")
-        return {"error": chatCompletion["error"]}
-
-    logging.debug(f"chatCompletion: {chatCompletion}")
-    try:
-        messages = []
-        if response_field_name in chatCompletion:
-            messages.append({
-                "role": "assistant",
-                "content": chatCompletion[response_field_name] 
-            })
-        if citations_field_name in chatCompletion:
-            citation_content= {"citations": chatCompletion[citations_field_name]}
-            messages.append({ 
-                "role": "tool",
-                "content": json.dumps(citation_content)
-            })
-
-        response_obj = {
-            "id": chatCompletion["id"],
-            "model": "",
-            "created": "",
-            "object": "",
-            "history_metadata": history_metadata,
-            "choices": [
-                {
-                    "messages": messages,
-                }
-            ]
-        }
-        return response_obj
-    except Exception as e:
-        logging.error(f"Exception in format_pf_non_streaming_response: {e}")
-        return {}
-
-
-def convert_to_pf_format(input_json, request_field_name, response_field_name):
-    output_json = []
-    logging.debug(f"Input json: {input_json}")
-    # align the input json to the format expected by promptflow chat flow
-    for message in input_json["messages"]:
-        if message:
-            if message["role"] == "user":
-                new_obj = {
-                    "inputs": {request_field_name: message["content"]},
-                    "outputs": {response_field_name: ""},
-                }
-                output_json.append(new_obj)
-            elif message["role"] == "assistant" and len(output_json) > 0:
-                output_json[-1]["outputs"][response_field_name] = message["content"]
-    logging.debug(f"PF formatted response: {output_json}")
-    return output_json
 
 
 def comma_separated_string_to_list(s: str) -> List[str]:
