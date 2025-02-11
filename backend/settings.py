@@ -778,7 +778,7 @@ class _AppSettings(BaseModel):
     
     # Constructed properties
     chat_history: Optional[_ChatHistorySettings] = None
-    datasource: Optional[DatasourcePayloadConstructor] = None
+    datasource: Optional[_AzureSearchSettings] = None
     promptflow: Optional[_PromptflowSettings] = None
 
     @model_validator(mode="after")

@@ -1,4 +1,6 @@
 from typing import Any, AsyncGenerator
+from openai import AsyncAzureOpenAI
+from azure.search.documents.aio import SearchClient
 
 from semantic_kernel import Kernel
 from semantic_kernel.contents.chat_history import ChatHistory
@@ -10,44 +12,53 @@ from semantic_kernel.connectors.ai.open_ai.services.azure_chat_completion import
 from semantic_kernel.connectors.ai.open_ai.prompt_execution_settings.azure_chat_prompt_execution_settings import (
     AzureChatPromptExecutionSettings,
 )
+from semantic_kernel.connectors.ai.function_choice_behavior import (
+    FunctionChoiceBehavior,
+)
 from semantic_kernel.contents.streaming_chat_message_content import (
     StreamingChatMessageContent,
 )
 from semantic_kernel.contents.utils.author_role import AuthorRole
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-from .plugins import HelixProxyPlugin
+from .plugins import HelixProxyPlugin, AzureAISearchPlugin
 
 from backend.utils import format_stream_response
 
-# system_message = """
-# You are an AI Helpdesk Assistant designed to process user input, provide accurate responses, and create support tickets when necessary.
+system_message = """
+You are an AI Helpdesk Assistant designed to process user input, provide accurate responses, and create support tickets when necessary.
 
-# Your tasks are as follows:
-# 1. Use the conversation history (`chat_history`) and the current user input (`user_input`) to determine the user's intent:
-#    - If a support ticket is needs to be created, use the provided plugin to do so. Only create a support ticket if the user explicitly requests it.
-#    - If no support ticket is required, respond to the user's question directly using the data provided.
-# 2. When creating support tickets:
-# - Ensure the user provides all necessary information required for ticket creation, including their name, email address, issue description, and issue category.
-# - Create a support ticket in the Helix system using the plugin.
-# 3. When answering user questions:
-#    - Provide concise, clear, and accurate responses based on the context of the conversation.
-#    - Use the available information from `chat_history` and `user_input` to address the query.
+Your tasks are as follows:
+1. Use the conversation history (`chat_history`) and the current user input (`user_input`) to determine the user's intent:
+    - If a support ticket needs to be created, use the provided plugin to do so. Only create a support ticket if the user explicitly requests it.
+    - If no support ticket is required, respond to the user's question directly using the search plugin.
+2. When creating support tickets:
+    - Ensure the user provides all necessary information required for ticket creation, including their name, email address, issue description, and issue category.
+    - Create a support ticket in the Helix system using the plugin.
+3. When answering user questions:
+    - Provide concise, clear, and accurate responses based on the context of the conversation.
+    - Use the available information from `chat_history` and `user_input` to address the query.
 
-# ### Decision Flow:
-# 1. Use the `chat_history` and `user_input` to assess whether the user's issue requires creating a support ticket.
-#    - If the issue requires escalation or tracking, proceed with ticket creation.
-#    - If the issue can be resolved directly, provide an immediate answer without creating a ticket.
-# 2. If unsure, prioritize resolving the issue directly unless the user explicitly requests ticket creation.
+### Decision Flow:
+1. Use the `chat_history` and `user_input` to assess whether the user wants to create a support ticket or just get a question answered.
+    - If the request is ambiguous, politely ask the user for clarification. 
+    - If the user indicates they want to open a ticket (e.g., "Please open a ticket for me"), begin gathering the required fields.
+    - If they want a ticket but haven't provided all required details, prompt the user for any missing pieces of information.
+2. If unsure, prioritize resolving the issue directly unless the user explicitly requests ticket creation.
 
-# ### Input:
-# - `chat_history`: The prior conversation between the user and the assistant.
-# - `user_input`: The latest message from the user, describing their issue.
+### Input:
+- `chat_history`: The prior conversation between the user and the assistant.
+- `user_input`: The latest message from the user, describing their issue.
 
-# ### Task:
-# Based on the user's intent:
-# - Either retrieve the necessary details to generate a support ticket.
-# - Or answer the user's question directly using the provided information.
-# """
+### Task:
+Based on the user's intent:
+- Either retrieve the necessary details to generate a support ticket.
+- Or answer the user's question directly using the provided information.
+- Always strive to produce clear, coherent, and contextually relevant responses, and handle multi-turn interactions gracefully.
+
+### Examples of user intents
+- "Please open a ticket for me." (Support ticket creation)
+- "How do I reset my password?" (Question answering)
+"""
 
 
 class Chat:
@@ -58,7 +69,7 @@ class Chat:
         self.__chat_function = chat_function
 
     @staticmethod
-    def __get_kernel(service_id: str) -> Kernel:
+    def __get_kernel(service_id: str, openai_client: AsyncAzureOpenAI, search_client: SearchClient, embedding_model: str) -> Kernel:
         token_provider = get_bearer_token_provider(
             DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
         )
@@ -67,13 +78,22 @@ class Chat:
         kernel.add_service(
             AzureChatCompletion(service_id=service_id, ad_token_provider=token_provider)
         )
+        
+        search_args = {
+            "top": 5,
+            "use_text_search": True,
+            "use_vector_search": True,
+            "use_semantic_ranker": False,
+        }
+        search_plugin = AzureAISearchPlugin(openai_client, search_client, embedding_model, **search_args)
 
+        kernel.add_plugin(search_plugin, plugin_name="search_plugin")
         kernel.add_plugin(HelixProxyPlugin(), plugin_name="helix_proxy_plugin")
         return kernel
 
     @classmethod
-    def create(cls, chat_id: str) -> "Chat":
-        kernel = cls.__get_kernel(chat_id)
+    def create(cls, chat_id: str, openai_client: AsyncAzureOpenAI, search_client: SearchClient, embedding_model: str) -> "Chat":
+        kernel = cls.__get_kernel(chat_id, openai_client, search_client, embedding_model)
 
         prompt_template_config = PromptTemplateConfig(
             template="{{$chat_history}}{{$user_input}}",
@@ -103,9 +123,7 @@ class Chat:
 
     async def invoke(
         self,
-        execution_settings: AzureChatPromptExecutionSettings,
-        request_body,
-        system_message,
+        request_body
     ) -> AsyncGenerator[dict[str, Any] | dict, Any]:
         history = ChatHistory()
         history.add_system_message(system_message)
@@ -124,6 +142,10 @@ class Chat:
                     history.add_user_message(message["content"])
 
         user_input = filtered_messages[-1]["content"]
+        
+        execution_settings = AzureChatPromptExecutionSettings(
+            function_choice_behavior=FunctionChoiceBehavior.Auto()
+        )
 
         arguments = KernelArguments(settings=execution_settings)
         arguments["user_input"] = user_input
