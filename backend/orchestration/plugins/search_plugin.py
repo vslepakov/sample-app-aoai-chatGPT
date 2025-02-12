@@ -5,7 +5,8 @@ from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import (
     VectorQuery,
     QueryType,
-    VectorizableTextQuery
+    VectorizableTextQuery,
+    QueryCaptionType
 )
 from semantic_kernel.functions.kernel_function_decorator import kernel_function
 
@@ -25,7 +26,7 @@ class AzureAISearchPlugin:
         self.use_text_search = kwargs.get("use_text_search", True)
         self.use_vector_search = kwargs.get("use_vector_search", False)
         self.use_semantic_ranker = kwargs.get("use_semantic_ranker", False)
-        self.use_semantic_captions = kwargs.get("use_semantic_captions", False)
+        self.use_semantic_captions = kwargs.get("use_semantic_captions", True)
         self.minimum_search_score = kwargs.get("minimum_search_score", 0.0)
         self.minimum_reranker_score = kwargs.get("minimum_reranker_score", 0.0)
 
@@ -92,7 +93,7 @@ class AzureAISearchPlugin:
                 search_text=search_text,
                 filter=filter,
                 top=top,
-                query_caption="extractive|highlight-false" if use_semantic_captions else None,
+                query_caption=QueryCaptionType.EXTRACTIVE if use_semantic_captions else None,
                 vector_queries=search_vectors,
                 query_type=QueryType.SEMANTIC,
                 semantic_configuration_name="default",
