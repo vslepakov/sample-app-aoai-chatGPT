@@ -56,6 +56,8 @@ def create_app():
                 index_name=app_settings.datasource.index,
                 credential=azure_credential,
             )
+            
+            app.chat = Chat.create("helpdesk_assistant", app.openai_client, app.search_client, app_settings.azure_openai.embedding_name)
         except Exception as e:
             logging.exception("Failed to initialize clients")
             app.cosmos_conversation_client = None
@@ -165,8 +167,7 @@ async def conversation_internal(request_body, request_headers):
                 
         request_body['messages'] = filtered_messages
             
-        chat = Chat.create("helpdesk_assistant", app.openai_client, app.search_client, app_settings.azure_openai.embedding_name)
-        result = await chat.invoke(request_body)
+        result = await app.chat.invoke(request_body)
             
         response = await make_response(format_as_ndjson(result))
         response.timeout = None
