@@ -54,7 +54,7 @@ class AzureAISearchPlugin:
         
         vectors: list[VectorizableTextQuery] = []
         if self.use_vector_search:
-            vectors.append(VectorizableTextQuery(kind="text", text=query, k_nearest_neighbors=50, fields="contentVector"))
+            vectors.append(VectorizableTextQuery(kind="text", text=query, k_nearest_neighbors=50, fields="text_vector"))
         
         results = await self.__search_internal(
             self.top, 
