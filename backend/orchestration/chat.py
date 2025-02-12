@@ -69,7 +69,7 @@ class Chat:
         self.__chat_function = chat_function
 
     @staticmethod
-    def __get_kernel(service_id: str, openai_client: AsyncAzureOpenAI, search_client: SearchClient, embedding_model: str) -> Kernel:
+    def __get_kernel(service_id: str, search_client: SearchClient) -> Kernel:
         token_provider = get_bearer_token_provider(
             DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
         )
@@ -85,15 +85,14 @@ class Chat:
             "use_vector_search": True,
             "use_semantic_ranker": False,
         }
-        search_plugin = AzureAISearchPlugin(openai_client, search_client, embedding_model, **search_args)
-
-        kernel.add_plugin(search_plugin, plugin_name="search_plugin")
+        
+        kernel.add_plugin(AzureAISearchPlugin(search_client, **search_args), plugin_name="search_plugin")
         kernel.add_plugin(HelixProxyPlugin(), plugin_name="helix_proxy_plugin")
         return kernel
 
     @classmethod
-    def create(cls, chat_id: str, openai_client: AsyncAzureOpenAI, search_client: SearchClient, embedding_model: str) -> "Chat":
-        kernel = cls.__get_kernel(chat_id, openai_client, search_client, embedding_model)
+    def create(cls, chat_id: str, search_client: SearchClient) -> "Chat":
+        kernel = cls.__get_kernel(chat_id, search_client)
 
         prompt_template_config = PromptTemplateConfig(
             template="{{$chat_history}}{{$user_input}}",

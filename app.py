@@ -57,7 +57,7 @@ def create_app():
                 credential=azure_credential,
             )
             
-            app.chat = Chat.create("helpdesk_assistant", app.openai_client, app.search_client, app_settings.azure_openai.embedding_name)
+            app.chat = Chat.create("helpdesk_assistant", app.search_client)
         except Exception as e:
             logging.exception("Failed to initialize clients")
             app.cosmos_conversation_client = None

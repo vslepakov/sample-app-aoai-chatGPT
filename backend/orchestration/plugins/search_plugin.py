@@ -1,12 +1,11 @@
 import logging
 from typing import Annotated, List, Optional
 from pydantic import BaseModel
-from openai import AsyncAzureOpenAI
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import (
     VectorQuery,
     QueryType,
-    VectorizedQuery
+    VectorizableTextQuery
 )
 from semantic_kernel.functions.kernel_function_decorator import kernel_function
 
@@ -20,10 +19,8 @@ class Document(BaseModel):
     
 
 class AzureAISearchPlugin:
-    def __init__(self, openai_client: AsyncAzureOpenAI, search_client: SearchClient, embedding_model: str, **kwargs):
+    def __init__(self, search_client: SearchClient, **kwargs):
         self.search_client = search_client
-        self.openai_client = openai_client
-        self.embedding_model = embedding_model
         self.top = kwargs.get("top", 5)
         self.use_text_search = kwargs.get("use_text_search", True)
         self.use_vector_search = kwargs.get("use_vector_search", False)
@@ -54,10 +51,9 @@ class AzureAISearchPlugin:
         """
         logging.info(f"Searching for: {query}")
         
-        vectors: list[VectorQuery] = []
+        vectors: list[VectorizableTextQuery] = []
         if self.use_vector_search:
-            logging.info("Generating embeddings for the query.")
-            vectors.append(await self.__compute_text_embedding(query))
+            vectors.append(VectorizableTextQuery(kind="text", text=query, k_nearest_neighbors=50, fields="contentVector"))
         
         results = await self.__search_internal(
             self.top, 
@@ -134,12 +130,3 @@ class AzureAISearchPlugin:
             ]
 
         return qualified_documents
-    
-    async def __compute_text_embedding(self, query: str):
-        embedding = await self.openai_client.embeddings.create(
-            # Azure OpenAI takes the deployment name as the model name
-            model=self.embedding_model,
-            input=query
-        )
-        query_vector = embedding.data[0].embedding
-        return VectorizedQuery(vector=query_vector, k_nearest_neighbors=50, fields="contentVector")
