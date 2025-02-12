@@ -46,13 +46,13 @@ def create_app():
             
             token_provider = get_bearer_token_provider(azure_credential, "https://cognitiveservices.azure.com/.default")
             app.openai_client =  AsyncAzureOpenAI(
-                api_version=app_settings.azure_openai.preview_api_version,
+                api_version=app_settings.azure_openai.api_version,
                 azure_endpoint=app_settings.azure_openai.endpoint,
                 azure_ad_token_provider=token_provider,
             )
             
             app.search_client = SearchClient(
-                endpoint=f"https://{app_settings.datasource.service}.search.windows.net",
+                endpoint=app_settings.datasource.endpoint,
                 index_name=app_settings.datasource.index,
                 credential=azure_credential,
             )
