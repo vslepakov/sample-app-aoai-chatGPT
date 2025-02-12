@@ -2,13 +2,9 @@ import logging
 from typing import Annotated, List, Optional
 from pydantic import BaseModel
 from azure.search.documents.aio import SearchClient
-from azure.search.documents.models import (
-    VectorQuery,
-    QueryType,
-    VectorizableTextQuery,
-    QueryCaptionType
-)
+from azure.search.documents.models import VectorizableTextQuery
 from semantic_kernel.functions.kernel_function_decorator import kernel_function
+from backend.search.aisearchservice import AiSearchService
 
 class Document(BaseModel):
     id: Optional[str] = None
@@ -20,15 +16,11 @@ class Document(BaseModel):
     
 
 class AzureAISearchPlugin:
-    def __init__(self, search_client: SearchClient, **kwargs):
-        self.search_client = search_client
-        self.top = kwargs.get("top", 5)
-        self.use_text_search = kwargs.get("use_text_search", True)
-        self.use_vector_search = kwargs.get("use_vector_search", False)
-        self.use_semantic_ranker = kwargs.get("use_semantic_ranker", False)
-        self.use_semantic_captions = kwargs.get("use_semantic_captions", True)
+    def __init__(self, search_service: AiSearchService, **kwargs):
+        self.__search_service = search_service
         self.minimum_search_score = kwargs.get("minimum_search_score", 0.0)
         self.minimum_reranker_score = kwargs.get("minimum_reranker_score", 0.0)
+        
 
     @kernel_function(
         name="search",
@@ -52,61 +44,9 @@ class AzureAISearchPlugin:
         """
         logging.info(f"Searching for: {query}")
         
-        vectors: list[VectorizableTextQuery] = []
-        if self.use_vector_search:
-            vectors.append(VectorizableTextQuery(kind="text", text=query, k_nearest_neighbors=50, fields="text_vector"))
+        vectors = [VectorizableTextQuery(kind="text", text=query, k_nearest_neighbors=50, fields="text_vector")]
+        results = await self.__search_service.search_knowledge(query_text=query, filter=None, vectors=vectors)
         
-        results = await self.__search_internal(
-            self.top, 
-            query, 
-            None, 
-            vectors, 
-            self.use_text_search, 
-            self.use_vector_search, 
-            self.use_semantic_ranker, 
-            self.use_semantic_captions,
-            self.minimum_search_score,
-            self.minimum_reranker_score
-        )
-        
-        return results
-    
-    async def __search_internal(
-        self,
-        top: int,
-        query_text: Optional[str],
-        filter: Optional[str],
-        vectors: List[VectorQuery],
-        use_text_search: bool,
-        use_vector_search: bool,
-        use_semantic_ranker: bool,
-        use_semantic_captions: bool,
-        minimum_search_score: Optional[float],
-        minimum_reranker_score: Optional[float]
-    ) -> List[Document]:
-        
-        search_text = query_text if use_text_search else ""
-        search_vectors = vectors if use_vector_search else []
-        
-        if use_semantic_ranker:
-            results = await self.search_client.search(
-                search_text=search_text,
-                filter=filter,
-                top=top,
-                query_caption=QueryCaptionType.EXTRACTIVE if use_semantic_captions else None,
-                vector_queries=search_vectors,
-                query_type=QueryType.SEMANTIC,
-                semantic_configuration_name="default",
-                semantic_query=query_text,
-            )
-        else:
-            results = await self.search_client.search(
-                search_text=search_text,
-                filter=filter,
-                top=top,
-                vector_queries=search_vectors,
-            )
-            
         documents = []
         async for page in results.by_page():
             async for document in page:
@@ -125,8 +65,8 @@ class AzureAISearchPlugin:
                 doc
                 for doc in documents
                 if (
-                    (doc.score or 0) >= (minimum_search_score or 0)
-                    and (doc.reranker_score or 0) >= (minimum_reranker_score or 0)
+                    (doc.score or 0) >= (self.minimum_search_score or 0)
+                    and (doc.reranker_score or 0) >= (self.minimum_reranker_score or 0)
                 )
             ]
 

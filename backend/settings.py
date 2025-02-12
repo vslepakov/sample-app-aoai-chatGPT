@@ -135,7 +135,7 @@ class _BaseSettings(BaseSettings):
     use_promptflow: bool = False
 
 
-class _AppSettings(BaseModel):
+class AppSettings(BaseModel):
     base_settings: _BaseSettings = _BaseSettings()
     azure_openai: _AzureOpenAISettings = _AzureOpenAISettings()
     datasource: _AzureSearchSettings = _AzureSearchSettings()
@@ -154,4 +154,4 @@ class _AppSettings(BaseModel):
         
         return self
 
-app_settings = _AppSettings()
+app_settings = AppSettings()

@@ -18,13 +18,13 @@ from azure.identity.aio import (
     get_bearer_token_provider
 )
 from openai import AsyncAzureOpenAI
-from azure.search.documents.aio import SearchClient
 from backend.auth.auth_utils import get_authenticated_user_details
 from backend.history.cosmosdbservice import CosmosConversationClient
 from backend.settings import app_settings
 from backend.utils import format_as_ndjson
 
 from backend.orchestration.chat import Chat
+from backend.search.aisearchservice import AiSearchService
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -51,21 +51,25 @@ def create_app():
                 azure_ad_token_provider=token_provider,
             )
             
-            app.search_client = SearchClient(
-                endpoint=app_settings.datasource.endpoint,
-                index_name=app_settings.datasource.index,
-                credential=azure_credential,
-            )
+            search_args = {
+                "top": 5,
+                "use_text_search": True,
+                "use_vector_search": True,
+                "use_semantic_ranker": False,
+            }
             
-            app.chat = Chat.create("helpdesk_assistant", app.search_client)
+            app.search_service = AiSearchService(azure_credential, app_settings, **search_args)
+            app.chat = Chat.create("helpdesk_assistant", token_provider, app.search_service)
         except Exception as e:
             logging.exception("Failed to initialize clients")
             app.cosmos_conversation_client = None
+            app.search_service = None
+            app.openai_client = None
             raise e
     
     @bp.after_app_serving
     async def close_clients():
-        await app.search_client.close()
+        await app.search_service.dispose()
         
     app.register_blueprint(bp)
     
