@@ -1,7 +1,6 @@
 import logging
 from typing import Annotated, List, Optional
 from pydantic import BaseModel
-from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizableTextQuery
 from semantic_kernel.functions.kernel_function_decorator import kernel_function
 from backend.search.aisearchservice import AiSearchService

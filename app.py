@@ -51,14 +51,7 @@ def create_app():
                 azure_ad_token_provider=token_provider,
             )
             
-            search_args = {
-                "top": 5,
-                "use_text_search": True,
-                "use_vector_search": True,
-                "use_semantic_ranker": False,
-            }
-            
-            app.search_service = AiSearchService(azure_credential, app_settings, **search_args)
+            app.search_service = AiSearchService(azure_credential, app_settings)
             app.chat = Chat.create("helpdesk_assistant", token_provider, app.search_service)
         except Exception as e:
             logging.exception("Failed to initialize clients")

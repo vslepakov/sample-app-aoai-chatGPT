@@ -15,13 +15,18 @@ class AiSearchService:
                 index_name=app_settings.datasource.index,
                 credential=azure_credential,
         )
+        
+        self.__template_search_client = SearchClient(
+            endpoint=app_settings.datasource.endpoint,
+            index_name= app_settings.datasource.template_index,
+            credential=azure_credential,
+        )
 
-        # TODO switch to app_settings
-        self.top = kwargs.get("top", 5)
-        self.use_text_search = kwargs.get("use_text_search", True)
-        self.use_vector_search = kwargs.get("use_vector_search", False)
-        self.use_semantic_ranker = kwargs.get("use_semantic_ranker", False)
-        self.use_semantic_captions = kwargs.get("use_semantic_captions", True)
+        self.top = app_settings.datasource.top_k
+        self.use_text_search = app_settings.datasource.use_text_search
+        self.use_vector_search = app_settings.datasource.use_vector_search
+        self.use_semantic_search = app_settings.datasource.use_semantic_search
+        self.use_semantic_captions = app_settings.datasource.use_semantic_captions
 
 
     async def search_knowledge(
@@ -32,6 +37,13 @@ class AiSearchService:
     ) -> AsyncSearchItemPaged[Dict]:
         return await self.__search_internal(self.__knowledge_search_client, query_text, filter, vectors)
     
+    async def search_templates(
+        self,
+        query_text: Optional[str],
+        filter: Optional[str],
+        vectors: List[VectorQuery],
+    ) -> AsyncSearchItemPaged[Dict]:
+        return await self.__search_internal(self.__template_search_client, query_text, filter, vectors)
     
     async def __search_internal( 
         self,
@@ -44,7 +56,7 @@ class AiSearchService:
         search_text = query_text if self.use_text_search else ""
         search_vectors = vectors if self.use_vector_search else []
         
-        if self.use_semantic_ranker:
+        if self.use_semantic_search:
             results = await search_client.search(
                 search_text=search_text,
                 filter=filter,
@@ -68,3 +80,4 @@ class AiSearchService:
     
     def dispose(self):
         self.__knowledge_search_client.close()
+        self.__template_search_client.close()

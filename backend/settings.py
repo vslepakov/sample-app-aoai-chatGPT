@@ -112,7 +112,11 @@ class _AzureSearchSettings(BaseSettings):
     service: str = Field(exclude=True)
     endpoint_suffix: str = Field(default="search.windows.net", exclude=True)
     index: str = Field(serialization_alias="index_name")
+    template_index: str = Field(serialization_alias="template_index_name")
+    use_text_search: bool = Field(default=True, exclude=True)
+    use_vector_search: bool = Field(default=True, exclude=True)
     use_semantic_search: bool = Field(default=False, exclude=True)
+    use_semantic_captions: bool = Field(default=False, exclude=True)
     
     # Constructed fields
     endpoint: Optional[str] = None
