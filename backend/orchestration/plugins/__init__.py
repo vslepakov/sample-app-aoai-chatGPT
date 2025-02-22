@@ -1,1 +1,2 @@
 from .helix_proxy_plugin import HelixProxyPlugin
+from .search_plugin import AzureAISearchPlugin
