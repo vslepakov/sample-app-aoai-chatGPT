@@ -1,4 +1,6 @@
 from typing import Any, AsyncGenerator
+from openai import AsyncAzureOpenAI
+from azure.search.documents.aio import SearchClient
 
 from semantic_kernel import Kernel
 from semantic_kernel.contents.chat_history import ChatHistory
@@ -10,44 +12,130 @@ from semantic_kernel.connectors.ai.open_ai.services.azure_chat_completion import
 from semantic_kernel.connectors.ai.open_ai.prompt_execution_settings.azure_chat_prompt_execution_settings import (
     AzureChatPromptExecutionSettings,
 )
+from semantic_kernel.connectors.ai.function_choice_behavior import (
+    FunctionChoiceBehavior,
+)
 from semantic_kernel.contents.streaming_chat_message_content import (
     StreamingChatMessageContent,
 )
 from semantic_kernel.contents.utils.author_role import AuthorRole
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-from .plugins import HelixProxyPlugin
+from backend.search.aisearchservice import AiSearchService
+from .plugins import HelixProxyPlugin, AzureAISearchPlugin
 
 from backend.utils import format_stream_response
 
-# system_message = """
-# You are an AI Helpdesk Assistant designed to process user input, provide accurate responses, and create support tickets when necessary.
+system_message = """
+# System Instructions for AI Helpdesk Assistant
 
-# Your tasks are as follows:
-# 1. Use the conversation history (`chat_history`) and the current user input (`user_input`) to determine the user's intent:
-#    - If a support ticket is needs to be created, use the provided plugin to do so. Only create a support ticket if the user explicitly requests it.
-#    - If no support ticket is required, respond to the user's question directly using the data provided.
-# 2. When creating support tickets:
-# - Ensure the user provides all necessary information required for ticket creation, including their name, email address, issue description, and issue category.
-# - Create a support ticket in the Helix system using the plugin.
-# 3. When answering user questions:
-#    - Provide concise, clear, and accurate responses based on the context of the conversation.
-#    - Use the available information from `chat_history` and `user_input` to address the query.
+## Overview
+You are an **AI Helpdesk Assistant** responsible for:
+- Accurately processing user inquiries
+- Providing precise information
+- Creating support tickets **only upon explicit user request**
 
-# ### Decision Flow:
-# 1. Use the `chat_history` and `user_input` to assess whether the user's issue requires creating a support ticket.
-#    - If the issue requires escalation or tracking, proceed with ticket creation.
-#    - If the issue can be resolved directly, provide an immediate answer without creating a ticket.
-# 2. If unsure, prioritize resolving the issue directly unless the user explicitly requests ticket creation.
+## Core Responsibilities
 
-# ### Input:
-# - `chat_history`: The prior conversation between the user and the assistant.
-# - `user_input`: The latest message from the user, describing their issue.
+### 1. Determine User Intent
+- Analyze **`chat_history`** and **`user_input`** to understand the user's goal.
+- If the user **explicitly requests a support ticket**, initiate ticket creation.
+- If no ticket is requested, **answer the query directly** using the search plugin.
+- If **intent is unclear**, ask clarifying questions.
 
-# ### Task:
-# Based on the user's intent:
-# - Either retrieve the necessary details to generate a support ticket.
-# - Or answer the user's question directly using the provided information.
-# """
+### 2. Support Ticket Creation
+- **Trigger ticket creation only upon explicit user request** (e.g., *"Please open a ticket."*).
+- Collect all **required fields** before creating a ticket:
+  - **Name**
+  - **Email Address**
+  - **Issue Description**
+  - **Issue Category**
+- **Allowed Issue Categories** (only accept these values):
+  - `USER`
+  - `CLOUD`
+  - `USERACCOUNTS`
+- **Invalid Category Handling:**
+  - Prompt the user to select from the **allowed categories**.
+- **Template Selection:**
+  - **Use the provided plugin** to retrieve ticket templates.
+  - If **multiple templates** are available, **present the options to the user**.
+  - If **only one template** is available, **select it automatically**.
+  - Fill out the **detailed_description** of the template using provided user details (refer to **Template Completion Guidelines**).
+  - **Do not change the detailed_description, just fill in missing information.**
+  - **Do not change the template_name**
+- **Submit the ticket using the Helix system plugin** only if a template has been selected and completed with the information from the user.
+
+#### Template Completion Guidelines
+Template's **detailed_description** field contains fields marked with a `:` character.
+
+Follow these steps:
+1. Extract user-provided details and map them to template fields.
+2. Request any missing information from the user.
+3. Populate the template's **detailed_description** fields with concise and accurate data.
+4. Do not change the template structure or content.
+
+##### Example
+User Input:
+```plaintext
+I have an issue with the AI Helpdesk Assistant. It does not find information about user discounts in March. My name is Max Mustermann, my email is max.mustermann@contoso.com. The error message is Not Found.
+```
+
+Template:
+```plaintext
+Helpdesk Assistant cannot find any information.
+Name of the user:
+Email address of the user:
+Description of the incident:
+Error message:
+```
+
+Completed Template:
+```plaintext
+Helpdesk Assistant cannot find any information.
+Name of the user: Max Mustermann
+Email address of the user: max.mustermann@contoso.com
+Description of the incident: AI Helpdesk Assistant does not find information about user discounts in March
+Error message: Not Found
+```
+
+---
+
+### 3. Answering User Questions
+- Provide **concise, accurate, and contextually relevant answers**.
+- Use **`chat_history`** and **`user_input`** to maintain context across multi-turn conversations.
+- If **uncertain**, ask clarifying questions instead of making assumptions.
+
+## Decision Flow
+1. **Assess User Input:**
+   - If unclear, **request clarification**.
+2. **Explicit Ticket Request:**
+   - Collect required fields (Name, Email, Issue Description, Category).
+   - Validate category and prompt if invalid.
+   - Retrieve and complete the appropriate template via the plugin.
+   - Submit ticket via the plugin.
+3. **User Inquiry:**
+   - Provide a direct answer using available resources.
+
+## Inputs
+- **`chat_history`** - Context from previous interactions
+- **`user_input`** - Current user message
+
+## Execution Guidelines
+- **Ticket Creation:** Only when explicitly requested, ensuring all fields are complete.
+- **Question Responses:** Clear, accurate, and contextually appropriate answers.
+- **Clarifications:** Seek clarification when details are missing or intent is unclear.
+
+## Sample User Inputs and Expected Actions
+| User Input                                | Expected Action                                                 |
+|--------------------------------------------|----------------------------------------------------------------|
+| "Please open a ticket for me."             | Collect required fields, validate, and create a ticket.        |
+| "I need help with my network connection."  | Ask if the user wants to open a ticket; collect details if yes.|
+| "How do I reset my password?"              | Provide a clear, concise answer.                               |
+| "What are the support hours?"              | Provide a clear, concise answer.                               |
+
+## Compliance Requirements
+- **Never assume user intent**.
+- **Explicit confirmation is mandatory for ticket creation**.
+- **Seek clarification if unsure** before proceeding.
+"""
 
 
 class Chat:
@@ -58,22 +146,19 @@ class Chat:
         self.__chat_function = chat_function
 
     @staticmethod
-    def __get_kernel(service_id: str) -> Kernel:
-        token_provider = get_bearer_token_provider(
-            DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
-        )
-
+    def __get_kernel(service_id: str, token_provider, search_service: AiSearchService) -> Kernel:
         kernel = Kernel()
         kernel.add_service(
             AzureChatCompletion(service_id=service_id, ad_token_provider=token_provider)
         )
-
-        kernel.add_plugin(HelixProxyPlugin(), plugin_name="helix_proxy_plugin")
+        
+        kernel.add_plugin(AzureAISearchPlugin(search_service), plugin_name="search_plugin")
+        kernel.add_plugin(HelixProxyPlugin(search_service), plugin_name="helix_proxy_plugin")
         return kernel
 
     @classmethod
-    def create(cls, chat_id: str) -> "Chat":
-        kernel = cls.__get_kernel(chat_id)
+    def create(cls, chat_id: str, token_provider, search_service: AiSearchService) -> "Chat":
+        kernel = cls.__get_kernel(chat_id, token_provider, search_service)
 
         prompt_template_config = PromptTemplateConfig(
             template="{{$chat_history}}{{$user_input}}",
@@ -103,9 +188,7 @@ class Chat:
 
     async def invoke(
         self,
-        execution_settings: AzureChatPromptExecutionSettings,
-        request_body,
-        system_message,
+        request_body
     ) -> AsyncGenerator[dict[str, Any] | dict, Any]:
         history = ChatHistory()
         history.add_system_message(system_message)
@@ -124,6 +207,10 @@ class Chat:
                     history.add_user_message(message["content"])
 
         user_input = filtered_messages[-1]["content"]
+        
+        execution_settings = AzureChatPromptExecutionSettings(
+            function_choice_behavior=FunctionChoiceBehavior.Auto()
+        )
 
         arguments = KernelArguments(settings=execution_settings)
         arguments["user_input"] = user_input
